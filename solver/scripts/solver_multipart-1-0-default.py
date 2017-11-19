@@ -247,16 +247,16 @@ a= [pd.read_csv("s3://{}/{}".format(options.input_bucket, i['Key']), sep='\t')  
 input1 = pd.concat(a)
 input1.to_csv('/mnt/tmp/solver2.csv',index=False)
 
-input1.rename(columns={
-                    'kpi_forecast':'KPI_SCORE',
-                    'kpi_type':'KPI_TYPE',
-                   'campaign':'campaign_id',
-                  'lifetime_numerator':'lifetime_metric_numerator',
-                  'today_numerator':'today_metric_numerator'},inplace=True)
+# input1.rename(columns={
+#                     'kpi_forecast':'KPI_SCORE',
+#                     'kpi_type':'KPI_TYPE',
+#                    'campaign':'campaign_id',
+#                   'lifetime_numerator':'lifetime_metric_numerator',
+#                   'today_numerator':'today_metric_numerator'},inplace=True)
 
 logger.info("Time to read in data and create dataframe")
 logger.info(step1 - start)
-input1.replace({'is_programmatic':{'true': True, 'false': False,'-1':False}},inplace=True)
+#input1.replace({'is_programmatic':{'true': True, 'false': False,'-1':False}},inplace=True)
 
 #input1.to_csv('/mnt/tmp/solver.csv',index=False)
 # input1 = pd.read_csv('solver.csv')
@@ -323,7 +323,7 @@ input1.replace({'is_programmatic':{'true': True, 'false': False,'-1':False}},inp
 ##Filter out rows with daily goal==0 and skip_daily_goal=0
 ### If one of the 2 columns is 0 with the other non 0 the row is still retained.
 logger.info("total number of rows before filtering: {}".format(input1.shape[0]))
-input1 = input1.loc[~(input1.needed_daily_quota == 0)& (input1.skip_daily_goal == False)]
+input1 = input1.loc[~(input1.needed_daily_quota == 0) & (input1.skip_daily_goal == False)]
 logger.info("total number of rows after filtering: {}".format(input1.shape[0]))
 input1.fillna(0,inplace=True)
 input1 = input1.loc[input1['forecast']!=0]
@@ -361,14 +361,15 @@ input1['remaining'] = np.floor(np.maximum(0,
                                        np.where(input1['skip_daily_goal']==True, input1['units'] - input1['lifetime_impressions'],
                                                 input1['needed_daily_quota'] - input1['today_impressions'])))
 
-input1.loc[(input1['kpi_goal'] == 0), 'kpi_type'] = 'Pacing'
+#input1.loc[(input1['kpi_goal'] == 0), 'KPI_TYPE'] = 'Pacing'
+input1.loc[((input1['KPI_TYPE']=='-1')|(input1['KPI_TYPE']=='0')),'KPI_TYPE']='Pacing'
 
 # Split the frame into regular slices and default slices and programmatic slices
 
-def_frame = input1.loc[(input1['zone_id']<0) | (input1['is_programmatic']==True)]
-print def_frame.head()
+input2 = input1.loc[(input1['zone_id']<0) | (input1['is_programmatic']==True)]
+input2['hour'] = -1
 
-logger.info("total number of default slices: {}".format(def_frame.shape[0]))
+logger.info("total number of default slices: {}".format(input2.shape[0]))
 logger.info("going to filter out hours from the plan. current size of input:{}".format(input1.shape[0]))
 input1 = input1.loc[input1['hour'] >= current_hour]
 
@@ -458,8 +459,6 @@ remaining_hours = 24 - current_hour
 #     new_end_time = max_end_time - sabtracting_hour_factor
 #     list_of_times.append((new_end_time - 3599, new_end_time))
 #     temp_hour += 1
-
-input2 = def_frame
 try:
     campaign_divisor_dict = input2.groupby('campaign_id')['banner_id'].nunique().to_frame().banner_id.to_dict()
 except:
@@ -467,12 +466,14 @@ except:
     exit(1)
 
 input2['buy_at_most'] = input2.apply(lambda x: int(
-    int(x['remaining'] * default_percentage) / (campaign_divisor_dict[x['campaign_id']] * remaining_hours)), axis=1)
+    int(x['remaining'] * default_percentage) / (campaign_divisor_dict[x['campaign_id']])), axis=1)
 if input2.shape[0] != input2.banner_id.nunique():
     print "Error creating defaults. Number of Banner_ids not matching number of default slices"
     #exit(1)
 else:
     print "Successfully created default slices per hour."
+logger.info("amount of is programmatic slices: {}".format(str(input2.loc[input2['is_programmatic']==True].shape)))
+
 
 # try:
 #     input3 = pd.DataFrame()
@@ -498,8 +499,6 @@ else:
 #         return -2
 #     return x['zone_id']
 
-print "amount of is programmatic slices"
-print input2.loc[input2['is_programmatic']==True].shape
 
 input2.loc[(input2['is_programmatic'] == True), 'buy_at_most'] = -1
 input2.loc[(input2['is_programmatic'] == True), 'zone_id'] = -2
@@ -522,7 +521,7 @@ def create_kpi_forecast_dict(dict1, slice):
     dict1[slice['zone_id'], slice['hour'], slice['features'], slice['banner_id']] = slice['KPI_SCORE']
 
 
-input1[input1['kpi_type'].isin(optimized_kpis)][
+input1[input1['KPI_TYPE'].isin(optimized_kpis)][
     ['zone_id', 'hour', 'features', 'banner_id', 'KPI_SCORE']].drop_duplicates().apply(
     lambda x: create_kpi_forecast_dict(kpi_forecast_dict, x), axis=1)
 
@@ -562,17 +561,18 @@ logger.info(step2 - step1)
 
 ####Calculate balances for soft constraint
 ###FOR Now Interaction and CTR soft constraints have the same penalty. This means both interaction and CTR are equally important
-nominator= input1[input1.kpi_type.isin(optimized_kpis)][['campaign_id', 'remaining']].drop_duplicates().remaining.sum()
+nominator= input1[input1.KPI_TYPE.isin(optimized_kpis)][['campaign_id', 'remaining']].drop_duplicates().remaining.sum()
+input1.to_csv('/mnt/tmp/input1.csv',index=False)
 denominator= input1[(input1.skip_daily_goal == False) & (input1.is_programmatic == False)][
                   ['campaign_id', 'remaining']].drop_duplicates().remaining.sum()
 
-logger.info(nominator)
-logger.info(denominator)
+logger.info("nominator: {}".format(nominator))
+logger.info("denominator: {}".format(denominator))
 
-ctr_balance = max(0,float(nominator)) / min(1,float(denominator))
+ctr_balance = float(float(nominator)/float(denominator))
 logger.info(ctr_balance)
 programmatic_balance = float(
-    input1[input1.is_programmatic == True][['campaign_id', 'remaining']].drop_duplicates().remaining.sum()) / input1[
+    input2[input2.is_programmatic == True][['campaign_id', 'remaining']].drop_duplicates().remaining.sum()) / input1[
                            ['campaign_id', 'remaining']].drop_duplicates().remaining.sum()
 logger.info(programmatic_balance)
 programmatic_balance = ctr_balance * programmatic_balance
@@ -609,9 +609,6 @@ def create_zone_avails_total_dict(dict1, slice):
 zone_fill_rate_dict = {}
 input1.groupby(['zone_id', 'hour'])['forecast'].sum().to_frame().reset_index().apply(
     lambda x: create_zone_avails_total_dict(zone_fill_rate_dict, x), axis=1)
-
-logger.info("fill rate dict:")
-logger.info(zone_fill_rate_dict)
 
 logger.info("define constraint #1:  for each zone, cannot exceeded the forecast*1.1")
 logger.info(
@@ -792,15 +789,15 @@ logger.info("define elastic constraint #3:  CTR & interaction")
 n = time.time()
 optimized_kpis = ['CTR', 'Interaction']
 kpi_campaigns = \
-    input1[((input1['kpi_type'] == 'CTR') | (input1['kpi_type'] == 'Interaction')) & (input1['is_programmatic'] == 0)][
+    input1[((input1['KPI_TYPE'] == 'CTR') | (input1['KPI_TYPE'] == 'Interaction')) & (input1['is_programmatic'] == False)][
         'campaign_id'].unique().tolist()
 # goal_1_dict=input1[input1.kpi_type=='CTR'][['campaign_id','goal_1']].drop_duplicates().set_index('campaign_id')['goal_1'].to_dict()
 # goal_2_dict=input1[input1.kpi_type=='CTR'][['campaign_id','goal_2']].drop_duplicates().set_index('campaign_id')['goal_2'].to_dict()
 goal_dict = \
-    input1[input1['kpi_type'].isin(optimized_kpis)][['campaign_id', 'kpi_goal']].drop_duplicates().set_index(
+    input1[input1['KPI_TYPE'].isin(optimized_kpis)][['campaign_id', 'kpi_goal']].drop_duplicates().set_index(
         'campaign_id')[
         'kpi_goal'].to_dict()
-list2 = input1[input1['kpi_type'].isin(optimized_kpis)][
+list2 = input1[input1['KPI_TYPE'].isin(optimized_kpis)][
     ['zone_id', 'banner_id', 'hour', 'features']].drop_duplicates().values.tolist()
 
 
@@ -847,7 +844,6 @@ for row in total_cache:
     c3 = LpAffineExpression([(variable_cache[i], kpi_cache[i] - lb3) for i in range(len(variable_cache))])
     constraint3 = LpConstraint(e=c3, sense=LpConstraintEQ, name='elc3_3_' + str(j), rhs=0)
     if penalty2 > 0:
-        print penalty2
         solver_model.extend(
             constraint1.makeElasticSubProblem(penalty=penalty2, proportionFreeBoundList=[0, max_remaining * 3]))
         solver_model.extend(
@@ -944,7 +940,7 @@ columns = ['hour',
      'experiment_percentage',
      'lifetime_numerator',
      'today_numerator',
-     'kpi_type',
+     'KPI_TYPE',
      'kpi_goal',
      'is_programmatic',
      'features',
@@ -1019,10 +1015,10 @@ def write_slices(x, list_c):
 ##This is the list of features to be included in the predicates
 #list_c1 = ['zone_id', 'country', 'region']
 ## This is the list of features in the slices
-l1 = ['hour','banner_id', 'weight', 'priority','buy_at_most', 'slice_id', 'zone_id', 'KPI_TYPE', 'KPI_SCORE',
+l1 = ['hour','banner_id', 'weight','buy_at_most', 'slice_id', 'zone_id', 'KPI_TYPE', 'KPI_SCORE',
       'is_programmatic', 'country', 'region']
 
-input2 = input1[['hour','zone_id',  'banner_id', 'weight', 'priority','country', 'region', 'buy_at_most', 'KPI_TYPE','KPI_SCORE', 'is_programmatic']].drop_duplicates()
+input2 = input1[['hour','zone_id',  'banner_id', 'weight','country', 'region', 'buy_at_most', 'KPI_TYPE','KPI_SCORE', 'is_programmatic']].drop_duplicates()
 input2 = input2.reset_index(drop=True).reset_index()
 current_timestamp = time.time().__int__().__str__()
 input2['slice_id'] = input2['index'].map(lambda x: str(x) + '_' + current_timestamp)
@@ -1046,9 +1042,12 @@ df_list = np.array_split(input2, int(input2.shape[0]/10))
 #
 # k = Key(options.input_bucket)
 def write_tsv():
-    input1.to_csv(output_file_tsv, index=False, sep='\t')
+    input2.to_csv(output_file_tsv, index=False, sep='\t')
+
     upload_to_s3(output_file_tsv, 'solver/current/')
     upload_to_s3(output_file_tsv, 'solver/{}/'.format(curr_date), is_delete=True)
+    logger.info("number of zones: {}".format(input2['zones'].nunique()))
+    logger.info("number of slices: {}".format(input.shape[0]))
 
 
 list_of_final_dicts = []
@@ -1056,7 +1055,6 @@ for df in df_list:
     final_dict = {}
     final_dict['buying_strategy_id'] = strategy_id
     final_dict['slices'] = df[l1].T.to_dict().values()
-    print final_dict
     list_of_final_dicts.append(final_dict)
     # df.apply(lambda x: write_slices(x, l1), axis=1)
     # print len(final_dict['slices'])
