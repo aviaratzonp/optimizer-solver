@@ -150,8 +150,10 @@ input1 = input1[input1.hour.isin(hours_to_keep)]
 ################
 
 def check_campaign_presence():
-    input_list=input1.campaign_id.unique().tolist()
-    output_list=solver_output.campaign_id.unique().tolist()
+    input_list=set(input1.campaign_id.unique().tolist())
+    output_list=set(solver_output.campaign_id.unique().tolist())
+
+
     control=True
     for campaign in input_list:
         if campaign not in output_list:
