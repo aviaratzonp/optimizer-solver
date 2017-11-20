@@ -1046,8 +1046,8 @@ def write_tsv():
 
     upload_to_s3(output_file_tsv, 'solver/current/')
     upload_to_s3(output_file_tsv, 'solver/{}/'.format(curr_date), is_delete=True)
-    logger.info("number of zones: {}".format(input2['zones'].nunique()))
-    logger.info("number of slices: {}".format(input.shape[0]))
+    logger.info("number of zones: {}".format(input2['zone_id'].nunique()))
+    logger.info("number of slices: {}".format(input2.shape[0]))
 
 
 list_of_final_dicts = []
